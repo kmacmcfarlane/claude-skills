@@ -7,28 +7,27 @@ A collection of [Claude Code skills](https://docs.anthropic.com/en/docs/claude-c
 | Skill | Description |
 |---|---|
 | [create-skill](skills/create-skill/) | Bootstrap a new skill from a description |
+| [goa](skills/goa/) | Design-first API development with the Goa v3 framework for Go |
 
-## Usage
+## Installation
 
-### Per-project (recommended)
+### Global — all projects (recommended)
 
-Copy or symlink individual skills into your project's `.claude/skills/` directory:
-
-```bash
-# Copy a skill
-cp -r /path/to/claude-skills/skills/create-skill .claude/skills/
-
-# Or symlink it
-ln -s /path/to/claude-skills/skills/create-skill .claude/skills/create-skill
-```
-
-### Global (all projects)
-
-Symlink skills into your personal Claude Code directory:
+Installs each skill as an individual symlink in `~/.claude/skills/`, making them available in every project. Safe to re-run after pulling new skills — it adds new links, updates changed ones, and removes stale ones.
 
 ```bash
-ln -s /path/to/claude-skills/skills/create-skill ~/.claude/skills/create-skill
+./bin/install-claude-skills-user
 ```
+
+### Per-project
+
+Installs each skill as an individual symlink in a project's `.claude/skills/` directory. Same re-run behavior as the global install.
+
+```bash
+./bin/install-claude-skills-project /path/to/your/project
+```
+
+Both scripts create per-skill symlinks rather than symlinking the entire directory, so `~/.claude/skills/` (or `.claude/skills/`) can also contain other skills without them being added to this repo.
 
 ## Creating new skills
 
