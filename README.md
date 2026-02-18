@@ -38,6 +38,10 @@ Use the `create-skill` skill itself:
 /create-skill A skill that runs the test suite and summarizes failures
 ```
 
+## Part of kmac-claude-kit
+
+This repo is one component of [kmac-claude-kit](https://github.com/kmacmcfarlane/kmac-claude-kit), a toolkit for building software with Claude Code. See that repo for how claude-skills, [claude-sandbox](https://github.com/kmacmcfarlane/claude-sandbox), and [claude-templates](https://github.com/kmacmcfarlane/claude-templates) fit together.
+
 ## License
 
 This project is licensed under the [GPL-3.0](LICENSE).
