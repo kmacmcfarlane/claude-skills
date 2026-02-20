@@ -115,6 +115,8 @@ HTTP(func() {
 
 Run `goa gen` after every design change. Implement the service interface. Never edit files in `gen/`.
 
+After codegen, run the project's test suite to verify that generated code compiles and existing tests still pass. Design changes often require updating service implementations to match the new generated interface.
+
 ### Step 5: Add error handling
 
 Define errors at API, service, or method level. Map to HTTP status codes and gRPC codes. See `references/patterns.md` for examples.
