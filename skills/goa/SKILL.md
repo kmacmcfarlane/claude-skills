@@ -117,6 +117,16 @@ Run `goa gen` after every design change. Implement the service interface. Never 
 
 After codegen, run the project's test suite to verify that generated code compiles and existing tests still pass. Design changes often require updating service implementations to match the new generated interface.
 
+### Step 4b: Wire up with NewHTTPHandler
+
+All Goa HTTP transport setup (mux, servers, mounting, middleware) MUST live in a `NewHTTPHandler()` function in `internal/api/http.go` — NOT inline in `main.go`. See `references/patterns.md` "HTTP Handler Wireup (Preferred)" for the full pattern.
+
+Key rules:
+- `main.go` owns dependency injection: config → stores → services → endpoints. It calls `NewHTTPHandler(endpoints..., logger, debug)` and gets back `http.Handler`.
+- `internal/api/http.go` owns HTTP transport: mux, decoder/encoder, server creation, `errorHandler`, mounting with route logging, debug middleware, and HTTP-level middleware (RequestID, Log, CORS).
+- Always provide an `errorHandler` that logs with the request ID for correlation.
+- When adding a new Goa service, add its endpoints parameter to `NewHTTPHandler` and wire it up inside that function.
+
 ### Step 5: Add error handling
 
 Define errors at API, service, or method level. Map to HTTP status codes and gRPC codes. See `references/patterns.md` for examples.

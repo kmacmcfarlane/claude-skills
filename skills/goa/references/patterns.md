@@ -453,6 +453,150 @@ func (s *myservicesrvc) List(ctx context.Context, p *gen.ListPayload) (*gen.List
 }
 ```
 
+## HTTP Handler Wireup (Preferred)
+
+The Goa HTTP transport layer (mux, servers, mounting, middleware) MUST be extracted into a `NewHTTPHandler()` function in `internal/api/http.go`. Do NOT inline this plumbing in `main.go`.
+
+### Separation of concerns
+
+- **`main.go`** owns dependency injection: config → stores → services → API service impls → Goa endpoints (+ endpoint middleware). It calls `NewHTTPHandler()` and gets back an `http.Handler`.
+- **`internal/api/http.go`** owns HTTP transport: mux creation, decoder/encoder, server instantiation, error handler, mounting, mount logging, debug middleware, and HTTP-level middleware (RequestID, Log, CORS, etc.).
+- **Boundary**: `main.go` passes `*<service>.Endpoints` in, gets `http.Handler` back. All Goa HTTP plumbing is encapsulated.
+
+### internal/api/http.go
+
+```go
+package api
+
+import (
+    "context"
+    "log"
+    "net/http"
+    "os"
+
+    "mymodule/gen/health"
+    "mymodule/gen/users"
+    healthsvr "mymodule/gen/http/health/server"
+    userssvr "mymodule/gen/http/users/server"
+    goahttp "goa.design/goa/v3/http"
+    httpmdlwr "goa.design/goa/v3/http/middleware"
+    "goa.design/goa/v3/middleware"
+)
+
+// NewHTTPHandler returns a standard http.Handler with all Goa services
+// mounted and middleware applied.
+func NewHTTPHandler(
+    usersEndpoints *users.Endpoints,
+    healthEndpoints *health.Endpoints,
+    logger *log.Logger,
+    debug bool,
+) http.Handler {
+
+    // Setup goa log adapter.
+    var (
+        adapter middleware.Logger
+    )
+    {
+        adapter = middleware.NewLogger(logger)
+    }
+
+    // Transport-specific request decoder and response encoder.
+    var (
+        dec = goahttp.RequestDecoder
+        enc = goahttp.ResponseEncoder
+    )
+
+    // Build the service HTTP request multiplexer.
+    mux := goahttp.NewMuxer()
+
+    // Create servers for each service.
+    var (
+        usersServer  *userssvr.Server
+        healthServer *healthsvr.Server
+    )
+    {
+        eh := errorHandler(logger)
+        usersServer = userssvr.New(usersEndpoints, mux, dec, enc, eh, nil)
+        healthServer = healthsvr.New(healthEndpoints, mux, dec, enc, eh, nil)
+        if debug {
+            servers := goahttp.Servers{
+                usersServer,
+                healthServer,
+            }
+            servers.Use(httpmdlwr.Debug(mux, os.Stdout))
+        }
+    }
+
+    // Mount servers on the mux and log routes.
+    userssvr.Mount(mux, usersServer)
+    for _, m := range usersServer.Mounts {
+        logger.Printf("HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
+    }
+
+    healthsvr.Mount(mux, healthServer)
+    for _, m := range healthServer.Mounts {
+        logger.Printf("HTTP %q mounted on %s %s", m.Method, m.Verb, m.Pattern)
+    }
+
+    // Wrap with HTTP middleware (applies to all endpoints).
+    var handler http.Handler = mux
+    {
+        handler = httpmdlwr.Log(adapter)(handler)
+        handler = httpmdlwr.RequestID()(handler)
+    }
+
+    return handler
+}
+
+// errorHandler returns a function that writes and logs the given error
+// along with the request ID for correlation.
+func errorHandler(logger *log.Logger) func(context.Context, http.ResponseWriter, error) {
+    return func(ctx context.Context, w http.ResponseWriter, err error) {
+        id := ctx.Value(middleware.RequestIDKey).(string)
+        _, _ = w.Write([]byte("[" + id + "] encoding: " + err.Error()))
+        logger.Printf("[%s] ERROR: %s", id, err.Error())
+    }
+}
+```
+
+### main.go (relevant wireup portion)
+
+```go
+// Create service implementations.
+var (
+    usersSvc  users.Service
+    healthSvc health.Service
+)
+{
+    usersSvc = api.NewUsersService(userStore, logger)
+    healthSvc = api.NewHealthService()
+}
+
+// Wrap services in Goa endpoints.
+var (
+    usersEndpoints  *users.Endpoints
+    healthEndpoints *health.Endpoints
+)
+{
+    usersEndpoints = users.NewEndpoints(usersSvc)
+    healthEndpoints = health.NewEndpoints(healthSvc)
+}
+
+// Build the HTTP handler (all Goa transport setup is encapsulated here).
+httpHandler := api.NewHTTPHandler(
+    usersEndpoints,
+    healthEndpoints,
+    logger,
+    debug,
+)
+
+// Create and start the HTTP server.
+srv := &http.Server{
+    Addr:    addr,
+    Handler: httpHandler,
+}
+```
+
 ## Static Files
 
 ```go
