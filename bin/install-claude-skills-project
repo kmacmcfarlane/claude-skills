@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Install all skills from this repo into a project's .claude/skills/ directory
-# by creating individual symlinks for each skill.
+# by copying each skill directory.
 #
 # Usage: install-claude-skills-project <project-dir>
 #
@@ -13,7 +13,7 @@ SKILLS_SRC="$SCRIPT_DIR/../skills"
 if [[ $# -lt 1 ]]; then
     echo "Usage: $(basename "$0") <project-dir>" >&2
     echo "" >&2
-    echo "Installs skill symlinks into <project-dir>/.claude/skills/" >&2
+    echo "Copies skills into <project-dir>/.claude/skills/" >&2
     exit 1
 fi
 
@@ -38,45 +38,16 @@ for skill_dir in "$SKILLS_SRC"/*/; do
     name="$(basename "$skill_dir")"
     target="$SKILLS_DST/$name"
 
-    if [[ -L "$target" ]]; then
-        existing="$(readlink -f "$target")"
-        expected="$(cd "$skill_dir" && pwd)"
-        if [[ "$existing" == "$expected" ]]; then
-            echo "  ok  $name"
-            installed+=("$name")
-            continue
-        fi
-        rm "$target"
-    elif [[ -e "$target" ]]; then
-        echo "  skip  $name (non-symlink already exists at $target)" >&2
+    if [[ -d "$target" ]] && diff -rq "$skill_dir" "$target" >/dev/null 2>&1; then
+        echo "  ok  $name"
+        installed+=("$name")
         continue
     fi
 
-    ln -s "$(cd "$skill_dir" && pwd)" "$target"
+    rm -rf "$target"
+    cp -r "$skill_dir" "$target"
     echo "  added  $name -> $target"
     installed+=("$name")
-done
-
-# Remove stale symlinks that point back into this repo's skills dir
-skills_src_resolved="$(cd "$SKILLS_SRC" && pwd)"
-for link in "$SKILLS_DST"/*/; do
-    [[ -L "${link%/}" ]] || continue
-    link_target="$(readlink -f "${link%/}")"
-    link_name="$(basename "${link%/}")"
-
-    if [[ "$link_target" == "$skills_src_resolved"/* ]]; then
-        found=false
-        for name in "${installed[@]}"; do
-            if [[ "$name" == "$link_name" ]]; then
-                found=true
-                break
-            fi
-        done
-        if [[ "$found" == false ]]; then
-            rm "${link%/}"
-            echo "  removed  $link_name (skill no longer exists in repo)"
-        fi
-    fi
 done
 
 echo ""
