@@ -62,7 +62,55 @@ import . "goa.design/goa/v3/dsl"
 - `Parent(name)` — Set parent service (URL nesting)
 - `CanonicalMethod(name)` — Set canonical method
 - `MapParams(args...)` — Map payload to query params
-- `SkipRequestBodyEncodeDecode()`, `SkipResponseBodyEncodeDecode()` — Skip encode/decode
+- `SkipRequestBodyEncodeDecode()` — Skip request body encode/decode; service receives `io.ReadCloser` (HTTP only)
+- `SkipResponseBodyEncodeDecode()` — Skip response body encode/decode; service returns `io.ReadCloser` (HTTP only)
+
+### HTTP Body Streaming (Skip Encode/Decode)
+
+Use `SkipRequestBodyEncodeDecode()` and `SkipResponseBodyEncodeDecode()` to bypass Goa's generated body encoder/decoder and stream HTTP bodies directly via `io.ReadCloser`. This avoids loading entire request/response bodies into memory.
+
+**Constraints:**
+- HTTP transport only — incompatible with gRPC
+- Payload/Result attributes must map to headers, path params, or query params (not body)
+
+```go
+// Upload: service receives the raw request body as io.ReadCloser
+Method("upload", func() {
+    Payload(func() {
+        Attribute("content_type", String)
+        Attribute("dir", String)
+    })
+    HTTP(func() {
+        POST("/upload/{*dir}")
+        Header("content_type:Content-Type")
+        SkipRequestBodyEncodeDecode()
+    })
+})
+
+// Download: service returns an io.ReadCloser that is streamed to the client
+Method("download", func() {
+    Payload(String)
+    Result(func() {
+        Attribute("length", Int64)
+        Required("length")
+    })
+    HTTP(func() {
+        GET("/download/{*filename}")
+        SkipResponseBodyEncodeDecode()
+        Response(func() {
+            Header("length:Content-Length")
+        })
+    })
+})
+```
+
+Generated service interface:
+```go
+type Service interface {
+    Upload(context.Context, *UploadPayload, io.ReadCloser) error
+    Download(context.Context, string) (*DownloadResult, io.ReadCloser, error)
+}
+```
 
 ### Path Parameters
 

@@ -518,6 +518,8 @@ func NewHTTPHandler(
         eh := errorHandler(logger)
         usersServer = userssvr.New(usersEndpoints, mux, dec, enc, eh, nil)
         healthServer = healthsvr.New(healthEndpoints, mux, dec, enc, eh, nil)
+        // Debug middleware logs HTTP requests and responses (headers + bodies)
+        // to stdout. Only enable in development.
         if debug {
             servers := goahttp.Servers{
                 usersServer,
@@ -596,6 +598,136 @@ srv := &http.Server{
     Handler: httpHandler,
 }
 ```
+
+## HTTP Body Streaming (Upload/Download)
+
+Use `SkipRequestBodyEncodeDecode()` and `SkipResponseBodyEncodeDecode()` to stream HTTP bodies directly via `io.ReadCloser`, avoiding loading entire payloads into memory. HTTP only — incompatible with gRPC.
+
+### Design
+
+```go
+var _ = Service("updown", func() {
+    Description("File upload and download with streaming.")
+
+    Method("upload", func() {
+        // Payload attributes must map to headers or path params — not body.
+        Payload(func() {
+            Attribute("content_type", String, "Content-Type header, must define value for multipart boundary.", func() {
+                Default("multipart/form-data; boundary=goa")
+                Pattern("multipart/[^;]+; boundary=.+")
+            })
+            Attribute("dir", String, "Upload directory.", func() {
+                Default("upload")
+            })
+        })
+        Error("invalid_media_type", ErrorResult)
+        Error("invalid_multipart_request", ErrorResult)
+        Error("internal_error", ErrorResult)
+        HTTP(func() {
+            POST("/upload/{*dir}")
+            Header("content_type:Content-Type")
+            SkipRequestBodyEncodeDecode()
+            Response("invalid_media_type", StatusBadRequest)
+            Response("invalid_multipart_request", StatusBadRequest)
+            Response("internal_error", StatusInternalServerError)
+        })
+    })
+
+    Method("download", func() {
+        Payload(String, func() {
+            Description("Path to downloaded file.")
+        })
+        // Result attributes must map to headers — not body.
+        Result(func() {
+            Attribute("length", Int64, "Content length in bytes.")
+            Required("length")
+        })
+        Error("invalid_file_path", ErrorResult)
+        Error("internal_error", ErrorResult)
+        HTTP(func() {
+            GET("/download/{*filename}")
+            SkipResponseBodyEncodeDecode()
+            Response(func() {
+                Header("length:Content-Length")
+            })
+            Response("invalid_file_path", StatusNotFound)
+            Response("internal_error", StatusInternalServerError)
+        })
+    })
+})
+```
+
+### Generated Service Interface
+
+```go
+type Service interface {
+    // Upload receives the raw HTTP request body as io.ReadCloser.
+    Upload(context.Context, *UploadPayload, io.ReadCloser) error
+    // Download returns a result (mapped to headers) and an io.ReadCloser
+    // that is streamed as the response body.
+    Download(context.Context, string) (*DownloadResult, io.ReadCloser, error)
+}
+```
+
+### Implementation
+
+```go
+// Upload streams request body to disk using multipart reader.
+func (s *updownsrvc) Upload(ctx context.Context, p *updown.UploadPayload, body io.ReadCloser) error {
+    defer body.Close()
+
+    uploadDir := filepath.Join(s.dir, p.Dir)
+    if err := os.MkdirAll(uploadDir, 0777); err != nil {
+        return updown.MakeInternalError(err)
+    }
+
+    _, params, err := mime.ParseMediaType(p.ContentType)
+    if err != nil {
+        return updown.MakeInvalidMediaType(err)
+    }
+    mr := multipart.NewReader(body, params["boundary"])
+
+    for {
+        part, err := mr.NextPart()
+        if err == io.EOF {
+            return nil
+        }
+        if err != nil {
+            return updown.MakeInvalidMultipartRequest(err)
+        }
+        f, err := os.Create(filepath.Join(uploadDir, part.FileName()))
+        if err != nil {
+            return updown.MakeInternalError(err)
+        }
+        defer f.Close()
+        if _, err := io.Copy(f, part); err != nil {
+            return updown.MakeInternalError(err)
+        }
+    }
+}
+
+// Download streams a file from disk to the client.
+func (s *updownsrvc) Download(ctx context.Context, filename string) (*updown.DownloadResult, io.ReadCloser, error) {
+    abs := filepath.Join(s.dir, filename)
+    fi, err := os.Stat(abs)
+    if err != nil {
+        return nil, nil, updown.MakeInvalidFilePath(err)
+    }
+    f, err := os.Open(abs)
+    if err != nil {
+        return nil, nil, updown.MakeInternalError(err)
+    }
+    // Goa streams f to the client and closes it when done.
+    return &updown.DownloadResult{Length: fi.Size()}, f, nil
+}
+```
+
+### Key Rules
+
+- **Payload/Result attributes cannot be body fields** — they must map to headers, path params, or query params
+- **Always close the `io.ReadCloser`** in upload handlers (`defer body.Close()`)
+- **Return an `io.ReadCloser`** from download handlers — Goa handles streaming and closing it
+- **HTTP only** — these DSL functions are incompatible with gRPC transport
 
 ## Static Files
 
