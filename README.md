@@ -1,5 +1,7 @@
 # claude-skills
 
+> **DEPRECATED** — This repo has been superseded by [claude-plugins](https://github.com/kmacmcfarlane/claude-plugins). All skills from this repo are now available as the `kmacmcfarlane` plugin in the private marketplace. Use `/plugin marketplace add kmacmcfarlane/claude-plugins` and `/plugin install kmacmcfarlane@mcfacehead` to install.
+
 A collection of [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) (slash commands) for use across projects.
 
 ## Skills
